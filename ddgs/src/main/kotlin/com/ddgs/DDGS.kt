@@ -1,0 +1,421 @@
+package com.ddgs
+
+import android.os.Build
+
+/**
+ * DDGS - Dux Distributed Global Search
+ *
+ * A metasearch library for Android that aggregates results from diverse web search services.
+ *
+ * @param proxy Proxy URL (supports http/https/socks5 protocols)
+ * @param timeout Timeout in seconds for HTTP requests
+ * @param verify Whether to verify SSL certificates
+ */
+class DDGS(
+    private val proxy: String? = null,
+    private val timeout: Int = 10,
+    private val verify: Boolean = true
+) {
+    private val httpClient = HttpClient(proxy, timeout, verify)
+    private val enginesCache = mutableMapOf<String, BaseSearchEngine>()
+
+    /**
+     * Perform a text search
+     */
+    suspend fun text(
+        query: String,
+        region: String = "us-en",
+        safesearch: String = "moderate",
+        timelimit: String? = null,
+        maxResults: Int = 10,
+        page: Int = 1,
+        backend: String = "auto"
+    ): List<TextResult> = search("text", query, region, safesearch, timelimit, maxResults, page, backend)
+
+    /**
+     * Perform an image search
+     */
+    suspend fun images(
+        query: String,
+        region: String = "us-en",
+        safesearch: String = "moderate",
+        timelimit: String? = null,
+        maxResults: Int = 10,
+        page: Int = 1,
+        backend: String = "auto",
+        size: String? = null,
+        color: String? = null,
+        typeImage: String? = null,
+        layout: String? = null,
+        licenseImage: String? = null
+    ): List<ImageResult> = searchImages(
+        query, region, safesearch, timelimit, maxResults, page, backend,
+        size, color, typeImage, layout, licenseImage
+    )
+
+    /**
+     * Perform a news search
+     */
+    suspend fun news(
+        query: String,
+        region: String = "us-en",
+        safesearch: String = "moderate",
+        timelimit: String? = null,
+        maxResults: Int = 10,
+        page: Int = 1,
+        backend: String = "auto"
+    ): List<NewsResult> = searchNews(query, region, safesearch, timelimit, maxResults, page, backend)
+
+    /**
+     * Perform a video search
+     */
+    suspend fun videos(
+        query: String,
+        region: String = "us-en",
+        safesearch: String = "moderate",
+        timelimit: String? = null,
+        maxResults: Int = 10,
+        page: Int = 1,
+        backend: String = "auto",
+        resolution: String? = null,
+        duration: String? = null,
+        licenseVideos: String? = null
+    ): List<VideoResult> = searchVideos(
+        query, region, safesearch, timelimit, maxResults, page, backend,
+        resolution, duration, licenseVideos
+    )
+
+    /**
+     * Perform a book search
+     */
+    suspend fun books(
+        query: String,
+        maxResults: Int = 10,
+        page: Int = 1,
+        backend: String = "auto"
+    ): List<BookResult> = searchBooks(query, maxResults, page, backend)
+
+    /**
+     * Extract content from a URL
+     */
+    suspend fun extract(url: String, format: ExtractFormat = ExtractFormat.TEXT_MARKDOWN): ExtractResult {
+        return httpClient.extract(url, format)
+    }
+
+    private suspend fun <T> search(
+        category: String,
+        query: String,
+        region: String,
+        safesearch: String,
+        timelimit: String?,
+        maxResults: Int,
+        page: Int,
+        backend: String
+    ): List<T> {
+        if (query.isBlank()) {
+            throw DDGSException("Query cannot be empty")
+        }
+
+        val engines = getEngines(category, backend)
+        val results = mutableListOf<T>()
+        val seenUrls = mutableSetOf<String>()
+
+        for (engine in engines) {
+            try {
+                val engineResults = engine.search(query, region, safesearch, timelimit, page) as? List<T>
+                    ?: continue
+
+                for (result in engineResults) {
+                    val url = when (result) {
+                        is TextResult -> result.href
+                        is ImageResult -> result.url
+                        is NewsResult -> result.url
+                        is VideoResult -> result.content
+                        is BookResult -> result.url
+                        else -> null
+                    }
+
+                    if (url != null && url !in seenUrls && url.isNotBlank()) {
+                        seenUrls.add(url)
+                        results.add(result)
+                    }
+                }
+
+                if (results.size >= maxResults) break
+            } catch (e: Exception) {
+                // Continue with next engine
+            }
+        }
+
+        return results.take(maxResults)
+    }
+
+    private suspend fun searchImages(
+        query: String,
+        region: String,
+        safesearch: String,
+        timelimit: String?,
+        maxResults: Int,
+        page: Int,
+        backend: String,
+        size: String?,
+        color: String?,
+        typeImage: String?,
+        layout: String?,
+        licenseImage: String?
+    ): List<ImageResult> {
+        if (query.isBlank()) {
+            throw DDGSException("Query cannot be empty")
+        }
+
+        val engines = getImageEngines(backend)
+        val results = mutableListOf<ImageResult>()
+        val seenUrls = mutableSetOf<String>()
+
+        for (engine in engines) {
+            try {
+                val engineResults = engine.searchImages(
+                    query, region, safesearch, timelimit, page,
+                    size, color, typeImage, layout, licenseImage
+                )
+
+                for (result in engineResults) {
+                    if (result.url.isNotBlank() && result.url !in seenUrls) {
+                        seenUrls.add(result.url)
+                        results.add(result)
+                    }
+                }
+
+                if (results.size >= maxResults) break
+            } catch (e: Exception) {
+                // Continue with next engine
+            }
+        }
+
+        return results.take(maxResults)
+    }
+
+    private suspend fun searchNews(
+        query: String,
+        region: String,
+        safesearch: String,
+        timelimit: String?,
+        maxResults: Int,
+        page: Int,
+        backend: String
+    ): List<NewsResult> {
+        if (query.isBlank()) {
+            throw DDGSException("Query cannot be empty")
+        }
+
+        val engines = getNewsEngines(backend)
+        val results = mutableListOf<NewsResult>()
+        val seenUrls = mutableSetOf<String>()
+
+        for (engine in engines) {
+            try {
+                val engineResults = engine.searchNews(query, region, safesearch, timelimit, page)
+
+                for (result in engineResults) {
+                    if (result.url.isNotBlank() && result.url !in seenUrls) {
+                        seenUrls.add(result.url)
+                        results.add(result)
+                    }
+                }
+
+                if (results.size >= maxResults) break
+            } catch (e: Exception) {
+                // Continue with next engine
+            }
+        }
+
+        return results.take(maxResults)
+    }
+
+    private suspend fun searchVideos(
+        query: String,
+        region: String,
+        safesearch: String,
+        timelimit: String?,
+        maxResults: Int,
+        page: Int,
+        backend: String,
+        resolution: String?,
+        duration: String?,
+        licenseVideos: String?
+    ): List<VideoResult> {
+        if (query.isBlank()) {
+            throw DDGSException("Query cannot be empty")
+        }
+
+        val engines = getVideoEngines(backend)
+        val results = mutableListOf<VideoResult>()
+        val seenUrls = mutableSetOf<String>()
+
+        for (engine in engines) {
+            try {
+                val engineResults = engine.searchVideos(
+                    query, region, safesearch, timelimit, page,
+                    resolution, duration, licenseVideos
+                )
+
+                for (result in engineResults) {
+                    if (result.content.isNotBlank() && result.content !in seenUrls) {
+                        seenUrls.add(result.content)
+                        results.add(result)
+                    }
+                }
+
+                if (results.size >= maxResults) break
+            } catch (e: Exception) {
+                // Continue with next engine
+            }
+        }
+
+        return results.take(maxResults)
+    }
+
+    private suspend fun searchBooks(
+        query: String,
+        maxResults: Int,
+        page: Int,
+        backend: String
+    ): List<BookResult> {
+        if (query.isBlank()) {
+            throw DDGSException("Query cannot be empty")
+        }
+
+        val engines = getBookEngines(backend)
+        val results = mutableListOf<BookResult>()
+        val seenUrls = mutableSetOf<String>()
+
+        for (engine in engines) {
+            try {
+                val engineResults = engine.searchBooks(query, page)
+
+                for (result in engineResults) {
+                    if (result.url.isNotBlank() && result.url !in seenUrls) {
+                        seenUrls.add(result.url)
+                        results.add(result)
+                    }
+                }
+
+                if (results.size >= maxResults) break
+            } catch (e: Exception) {
+                // Continue with next engine
+            }
+        }
+
+        return results.take(maxResults)
+    }
+
+    private fun getEngines(category: String, backend: String): List<BaseSearchEngine> {
+        val engineList = when (category) {
+            "text" -> listOf(
+                getOrCreateEngine("google") { GoogleEngine(httpClient) },
+                getOrCreateEngine("duckduckgo") { DuckDuckGoEngine(httpClient) },
+                getOrCreateEngine("bing") { BingEngine(httpClient) },
+                getOrCreateEngine("brave") { BraveEngine(httpClient) },
+                getOrCreateEngine("yandex") { YandexEngine(httpClient) },
+                getOrCreateEngine("wikipedia") { WikipediaEngine(httpClient) }
+            )
+            else -> listOf(getOrCreateEngine("duckduckgo") { DuckDuckGoEngine(httpClient) })
+        }
+
+        return if (backend == "auto") {
+            engineList.shuffled()
+        } else {
+            engineList.filter { it.name in backend.split(",").map { it.trim() } }
+        }
+    }
+
+    private fun getImageEngines(backend: String): List<ImageSearchEngine> {
+        val engineList = listOf(
+            getOrCreateEngine("bing_images") { BingImagesEngine(httpClient) },
+            getOrCreateEngine("duckduckgo_images") { DuckDuckGoImagesEngine(httpClient) }
+        )
+
+        return if (backend == "auto") {
+            engineList.shuffled()
+        } else {
+            engineList.filter { it.name in backend.split(",").map { it.trim() } }
+        }
+    }
+
+    private fun getNewsEngines(backend: String): List<NewsSearchEngine> {
+        val engineList = listOf(
+            getOrCreateEngine("bing_news") { BingNewsEngine(httpClient) },
+            getOrCreateEngine("duckduckgo_news") { DuckDuckGoNewsEngine(httpClient) }
+        )
+
+        return if (backend == "auto") {
+            engineList.shuffled()
+        } else {
+            engineList.filter { it.name in backend.split(",").map { it.trim() } }
+        }
+    }
+
+    private fun getVideoEngines(backend: String): List<VideoSearchEngine> {
+        val engineList = listOf(
+            getOrCreateEngine("duckduckgo_videos") { DuckDuckGoVideosEngine(httpClient) }
+        )
+
+        return if (backend == "auto") {
+            engineList.shuffled()
+        } else {
+            engineList.filter { it.name in backend.split(",").map { it.trim() } }
+        }
+    }
+
+    private fun getBookEngines(backend: String): List<BookSearchEngine> {
+        val engineList = listOf(
+            getOrCreateEngine("annas_archive") { AnnasArchiveEngine(httpClient) }
+        )
+
+        return if (backend == "auto") {
+            engineList.shuffled()
+        } else {
+            engineList.filter { it.name in backend.split(",").map { it.trim() } }
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T : BaseSearchEngine> getOrCreateEngine(key: String, factory: () -> T): T {
+        return enginesCache.getOrPut(key, { factory() }) as T
+    }
+
+    companion object {
+        /**
+         * Available text search backends
+         */
+        val TEXT_BACKENDS = listOf("google", "bing", "duckduckgo", "brave", "yandex", "wikipedia")
+
+        /**
+         * Available image search backends
+         */
+        val IMAGE_BACKENDS = listOf("bing", "duckduckgo")
+
+        /**
+         * Available news search backends
+         */
+        val NEWS_BACKENDS = listOf("bing", "duckduckgo")
+
+        /**
+         * Available video search backends
+         */
+        val VIDEO_BACKENDS = listOf("duckduckgo")
+
+        /**
+         * Available book search backends
+         */
+        val BOOK_BACKENDS = listOf("annasarchive")
+    }
+}
+
+enum class ExtractFormat {
+    TEXT_MARKDOWN,
+    TEXT_PLAIN,
+    TEXT_RICH,
+    TEXT,
+    CONTENT
+}
