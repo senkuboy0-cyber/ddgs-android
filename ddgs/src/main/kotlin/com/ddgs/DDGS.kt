@@ -18,7 +18,11 @@ class DDGS(
     private val verify: Boolean = true
 ) {
     private val httpClient = HttpClient(proxy, timeout, verify)
-    private val enginesCache = mutableMapOf<String, BaseSearchEngine>()
+    private val textEnginesCache = mutableMapOf<String, BaseSearchEngine>()
+    private val imageEnginesCache = mutableMapOf<String, ImageSearchEngine>()
+    private val newsEnginesCache = mutableMapOf<String, NewsSearchEngine>()
+    private val videoEnginesCache = mutableMapOf<String, VideoSearchEngine>()
+    private val bookEnginesCache = mutableMapOf<String, BookSearchEngine>()
 
     /**
      * Perform a text search
@@ -31,7 +35,7 @@ class DDGS(
         maxResults: Int = 10,
         page: Int = 1,
         backend: String = "auto"
-    ): List<TextResult> = search("text", query, region, safesearch, timelimit, maxResults, page, backend)
+    ): List<TextResult> = searchText(query, region, safesearch, timelimit, maxResults, page, backend)
 
     /**
      * Perform an image search
@@ -103,8 +107,7 @@ class DDGS(
         return httpClient.extract(url, format)
     }
 
-    private suspend fun <T> search(
-        category: String,
+    private suspend fun searchText(
         query: String,
         region: String,
         safesearch: String,
@@ -112,32 +115,22 @@ class DDGS(
         maxResults: Int,
         page: Int,
         backend: String
-    ): List<T> {
+    ): List<TextResult> {
         if (query.isBlank()) {
             throw DDGSException("Query cannot be empty")
         }
 
-        val engines = getEngines(category, backend)
-        val results = mutableListOf<T>()
+        val engines = getTextEngines(backend)
+        val results = mutableListOf<TextResult>()
         val seenUrls = mutableSetOf<String>()
 
         for (engine in engines) {
             try {
-                val engineResults = engine.search(query, region, safesearch, timelimit, page) as? List<T>
-                    ?: continue
+                val engineResults = engine.search(query, region, safesearch, timelimit, page)
 
                 for (result in engineResults) {
-                    val url = when (result) {
-                        is TextResult -> result.href
-                        is ImageResult -> result.url
-                        is NewsResult -> result.url
-                        is VideoResult -> result.content
-                        is BookResult -> result.url
-                        else -> null
-                    }
-
-                    if (url != null && url !in seenUrls && url.isNotBlank()) {
-                        seenUrls.add(url)
+                    if (result.href.isNotBlank() && result.href !in seenUrls) {
+                        seenUrls.add(result.href)
                         results.add(result)
                     }
                 }
@@ -310,18 +303,15 @@ class DDGS(
         return results.take(maxResults)
     }
 
-    private fun getEngines(category: String, backend: String): List<BaseSearchEngine> {
-        val engineList = when (category) {
-            "text" -> listOf(
-                getOrCreateEngine("google") { GoogleEngine(httpClient) },
-                getOrCreateEngine("duckduckgo") { DuckDuckGoEngine(httpClient) },
-                getOrCreateEngine("bing") { BingEngine(httpClient) },
-                getOrCreateEngine("brave") { BraveEngine(httpClient) },
-                getOrCreateEngine("yandex") { YandexEngine(httpClient) },
-                getOrCreateEngine("wikipedia") { WikipediaEngine(httpClient) }
-            )
-            else -> listOf(getOrCreateEngine("duckduckgo") { DuckDuckGoEngine(httpClient) })
-        }
+    private fun getTextEngines(backend: String): List<BaseSearchEngine> {
+        val engineList = listOf(
+            textEnginesCache.getOrPut("google") { GoogleEngine(httpClient) },
+            textEnginesCache.getOrPut("duckduckgo") { DuckDuckGoEngine(httpClient) },
+            textEnginesCache.getOrPut("bing") { BingEngine(httpClient) },
+            textEnginesCache.getOrPut("brave") { BraveEngine(httpClient) },
+            textEnginesCache.getOrPut("yandex") { YandexEngine(httpClient) },
+            textEnginesCache.getOrPut("wikipedia") { WikipediaEngine(httpClient) }
+        )
 
         return if (backend == "auto") {
             engineList.shuffled()
@@ -332,8 +322,8 @@ class DDGS(
 
     private fun getImageEngines(backend: String): List<ImageSearchEngine> {
         val engineList = listOf(
-            getOrCreateEngine("bing_images") { BingImagesEngine(httpClient) },
-            getOrCreateEngine("duckduckgo_images") { DuckDuckGoImagesEngine(httpClient) }
+            imageEnginesCache.getOrPut("bing_images") { BingImagesEngine(httpClient) },
+            imageEnginesCache.getOrPut("duckduckgo_images") { DuckDuckGoImagesEngine(httpClient) }
         )
 
         return if (backend == "auto") {
@@ -345,8 +335,8 @@ class DDGS(
 
     private fun getNewsEngines(backend: String): List<NewsSearchEngine> {
         val engineList = listOf(
-            getOrCreateEngine("bing_news") { BingNewsEngine(httpClient) },
-            getOrCreateEngine("duckduckgo_news") { DuckDuckGoNewsEngine(httpClient) }
+            newsEnginesCache.getOrPut("bing_news") { BingNewsEngine(httpClient) },
+            newsEnginesCache.getOrPut("duckduckgo_news") { DuckDuckGoNewsEngine(httpClient) }
         )
 
         return if (backend == "auto") {
@@ -358,7 +348,7 @@ class DDGS(
 
     private fun getVideoEngines(backend: String): List<VideoSearchEngine> {
         val engineList = listOf(
-            getOrCreateEngine("duckduckgo_videos") { DuckDuckGoVideosEngine(httpClient) }
+            videoEnginesCache.getOrPut("duckduckgo_videos") { DuckDuckGoVideosEngine(httpClient) }
         )
 
         return if (backend == "auto") {
@@ -370,7 +360,7 @@ class DDGS(
 
     private fun getBookEngines(backend: String): List<BookSearchEngine> {
         val engineList = listOf(
-            getOrCreateEngine("annas_archive") { AnnasArchiveEngine(httpClient) }
+            bookEnginesCache.getOrPut("annas_archive") { AnnasArchiveEngine(httpClient) }
         )
 
         return if (backend == "auto") {
@@ -378,11 +368,6 @@ class DDGS(
         } else {
             engineList.filter { it.name in backend.split(",").map { it.trim() } }
         }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun <T : BaseSearchEngine> getOrCreateEngine(key: String, factory: () -> T): T {
-        return enginesCache.getOrPut(key, { factory() }) as T
     }
 
     companion object {

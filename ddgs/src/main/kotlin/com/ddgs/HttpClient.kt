@@ -37,7 +37,7 @@ class HttpClient(
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     )
 
-    private val client: HttpClient = HttpClient(OkHttp) {
+    private val ktorClient: HttpClient = HttpClient(OkHttp) {
         engine {
             config {
                 connectTimeout(timeout.toLong(), TimeUnit.SECONDS)
@@ -58,7 +58,7 @@ class HttpClient(
             }
 
             if (proxy != null) {
-                proxy = ProxyBuilder.http(proxy)
+                proxy { url(proxy) }
             }
         }
 
@@ -85,7 +85,7 @@ class HttpClient(
 
     suspend fun get(url: String, params: Map<String, String> = emptyMap()): String = withContext(Dispatchers.IO) {
         try {
-            val response: HttpResponse = client.get(url) {
+            val response: HttpResponse = ktorClient.get(url) {
                 headers {
                     append(HttpHeaders.UserAgent, getRandomUserAgent())
                     append(HttpHeaders.Accept, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -104,19 +104,19 @@ class HttpClient(
 
     suspend fun post(url: String, data: Map<String, String> = emptyMap()): String = withContext(Dispatchers.IO) {
         try {
-            val response: HttpResponse = client.post(url) {
+            val response: HttpResponse = ktorClient.post(url) {
                 headers {
                     append(HttpHeaders.UserAgent, getRandomUserAgent())
                     append(HttpHeaders.Accept, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                     append(HttpHeaders.AcceptLanguage, "en-US,en;q=0.9")
                     append(HttpHeaders.AcceptEncoding, "gzip, deflate, br")
-                    append(HttpHeaders.ContentType, ContentType.Application.FormUrlEncoded)
+                    append(HttpHeaders.ContentType, ContentType.Application.FormUrlEncoded.toString())
                 }
-                setBody(FormDataContent(Parameters.build {
+                setBody(parameters {
                     data.forEach { (key, value) ->
                         append(key, value)
                     }
-                }))
+                })
             }
             response.bodyAsText()
         } catch (e: Exception) {
@@ -251,7 +251,7 @@ class HttpClient(
     }
 
     fun close() {
-        client.close()
+        ktorClient.close()
     }
 }
 

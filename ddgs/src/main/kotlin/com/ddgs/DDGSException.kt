@@ -3,7 +3,7 @@ package com.ddgs
 /**
  * Base exception for DDGS library
  */
-class DDGSException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class DDGSException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
  * Exception thrown when a search request times out
