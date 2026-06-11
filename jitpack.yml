@@ -1,0 +1,21 @@
+jdk:
+  - openjdk17
+
+before_install:
+  - sdk install gradle 8.10.2
+  - sdk use gradle 8.10.2
+  - gradle wrapper --gradle-version 8.10.2
+
+install:
+  - cd ddgs && gradle assembleRelease --no-daemon
+
+build:
+  - ddgs/gradlew assembleRelease --no-daemon
+
+cache:
+  directories:
+    - ~/.gradle/caches/
+    - ~/.gradle/wrapper/
+
+afterSuccess:
+  - echo "Build completed successfully"
