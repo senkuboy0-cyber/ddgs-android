@@ -37,7 +37,7 @@ class HttpClient(
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     )
 
-    private val ktorClient: HttpClient = HttpClient(OkHttp) {
+    private val ktor: HttpClient = HttpClient(OkHttp) {
         engine {
             config {
                 connectTimeout(timeout.toLong(), TimeUnit.SECONDS)
@@ -55,10 +55,6 @@ class HttpClient(
                     sslContext.init(null, trustAllCerts, SecureRandom())
                     sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
                 }
-            }
-
-            if (proxy != null) {
-                proxy { url(proxy) }
             }
         }
 
@@ -85,18 +81,19 @@ class HttpClient(
 
     suspend fun get(url: String, params: Map<String, String> = emptyMap()): String = withContext(Dispatchers.IO) {
         try {
-            val response: HttpResponse = ktorClient.get(url) {
+            ktor.get(url) {
                 headers {
                     append(HttpHeaders.UserAgent, getRandomUserAgent())
                     append(HttpHeaders.Accept, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                     append(HttpHeaders.AcceptLanguage, "en-US,en;q=0.9")
                     append(HttpHeaders.AcceptEncoding, "gzip, deflate, br")
                 }
-                params.forEach { (key, value) ->
-                    parameter(key, value)
+                url {
+                    params.forEach { (key, value) ->
+                        parameters.append(key, value)
+                    }
                 }
-            }
-            response.bodyAsText()
+            }.bodyAsText()
         } catch (e: Exception) {
             throw DDGSException("Failed to fetch $url: ${e.message}", e)
         }
@@ -104,7 +101,7 @@ class HttpClient(
 
     suspend fun post(url: String, data: Map<String, String> = emptyMap()): String = withContext(Dispatchers.IO) {
         try {
-            val response: HttpResponse = ktorClient.post(url) {
+            ktor.post(url) {
                 headers {
                     append(HttpHeaders.UserAgent, getRandomUserAgent())
                     append(HttpHeaders.Accept, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -112,13 +109,12 @@ class HttpClient(
                     append(HttpHeaders.AcceptEncoding, "gzip, deflate, br")
                     append(HttpHeaders.ContentType, ContentType.Application.FormUrlEncoded.toString())
                 }
-                setBody(parameters {
+                setBody(Parameters.build {
                     data.forEach { (key, value) ->
                         append(key, value)
                     }
-                })
-            }
-            response.bodyAsText()
+                }.formUrlEncode())
+            }.bodyAsText()
         } catch (e: Exception) {
             throw DDGSException("Failed to post to $url: ${e.message}", e)
         }
@@ -251,7 +247,7 @@ class HttpClient(
     }
 
     fun close() {
-        ktorClient.close()
+        ktor.close()
     }
 }
 
